@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HYROX Sport Detail 查看器</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --border: #e0e4ea;
+    --primary: #2f6fed;
+    --primary-hover: #1f5bd0;
+    --text: #1f2933;
+    --muted: #6b7280;
+    --header-bg: #f0f4fb;
+    --row-hover: #f8fafc;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  .header { max-width: 1200px; margin: 0 auto 24px; }
+  .header h1 { font-size: 22px; font-weight: 600; }
+  .header p { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.6; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 0 auto 20px;
+    max-width: 1200px;
+  }
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all .2s;
+    background: #fafbfc;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--primary);
+    background: #eef4ff;
+    color: var(--primary);
+  }
+  .drop-zone input[type=file] { display: none; }
+  .drop-zone .icon { font-size: 34px; margin-bottom: 8px; display: block; }
+  .file-list { margin-top: 16px; }
+  .file-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+    margin-bottom: 6px; background: #fff; font-size: 14px;
+  }
+  .file-item .name { font-weight: 500; word-break: break-all; }
+  .file-item .status { font-size: 12px; }
+  .status.ok { color: #16a34a; }
+  .status.err { color: #dc2626; }
+  .tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 0; flex-wrap: wrap; }
+  .tab {
+    padding: 10px 18px; cursor: pointer; border: none; background: transparent;
+    font-size: 14px; font-weight: 500; color: var(--muted);
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+  }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab .count {
+    background: var(--header-bg); color: var(--muted); border-radius: 10px;
+    padding: 1px 8px; font-size: 12px; margin-left: 6px;
+  }
+  .tab.active .count { background: #e3edff; color: var(--primary); }
+  .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 0 0; }
+  .btn {
+    background: var(--primary); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer; font-weight: 500;
+    transition: background .2s;
+  }
+  .btn:hover { background: var(--primary-hover); }
+  .btn.secondary {
+    background: #fff; color: var(--text); border: 1px solid var(--border);
+  }
+  .btn.secondary:hover { background: var(--header-bg); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 100%; }
+  thead th {
+    position: sticky; top: 0; background: var(--header-bg); color: var(--text);
+    font-weight: 600; padding: 10px 12px; text-align: left; white-space: nowrap;
+    border-bottom: 1px solid var(--border); z-index: 1;
+  }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid #eef1f5; white-space: nowrap; }
+  tbody tr:hover { background: var(--row-hover); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+    margin-top: 16px;
+  }
+  .summary-item {
+    background: #fafbfc; border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  }
+  .summary-item .label { font-size: 12px; color: var(--muted); }
+  .summary-item .value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #1f2933; color: #fff; padding: 10px 18px; border-radius: 6px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .3s;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>HYROX Sport Detail 查看器</h1>
+    <p>选择 <code>_sport_detail.json</code> 文件，浏览器本地解析并展示
+       <code>hyroxRepLap</code> / <code>hyroxCounting</code> / <code>hyroxTimelines</code> 三个字段的表格。
+       逻辑与 <code>format_hyrox_structures.py</code> 对齐（删除 rep 时间戳字段、timelines 拆分）。数据不离开本机。</p>
+  </div>
+
+  <div class="card">
+    <div class="drop-zone" id="dropZone">
+      <span class="icon">📄</span>
+      <div>点击选择或拖拽 JSON 文件到此处（可多选）</div>
+      <div style="font-size:12px;margin-top:6px">支持 .json / .txt</div>
+    </div>
+    <input type="file" id="fileInput" accept=".json,.txt,application/json,text/plain" multiple>
+    <div class="file-list" id="fileList"></div>
+  </div>
+
+  <div class="card" id="viewerCard" style="display:none">
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="count" id="cntRepLap">0</span></button>
+      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="count" id="cntCounting">0</span></button>
+      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="count" id="cntTimelines">0</span></button>
+    </div>
+    <div class="toolbar">
+      <select id="fileSelector" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff"></select>
+      <button class="btn secondary" id="btnDownload">下载格式化 JSON</button>
+    </div>
+    <div class="summary-grid" id="summaryGrid"></div>
+    <div class="table-wrap" id="tableWrap"></div>
+    <div class="meta" id="metaInfo"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- 状态 ----
+  var filesData = {};   // fileName -> { repLap:[], counting:[], timelines:[], raw:{} }
+  var activeFile = null;
+  var activeTab = 'hyroxRepLap';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var dropZone = $('dropZone');
+  var fileInput = $('fileInput');
+  var viewerCard = $('viewerCard');
+  var fileSelector = $('fileSelector');
+  var fileList = $('fileList');
+  var tabsEl = $('tabs');
+  var tableWrap = $('tableWrap');
+  var summaryGrid = $('summaryGrid');
+  var metaInfo = $('metaInfo');
+  var toast = $('toast');
+
+  // ---- 工具函数 ----
+  function toastMsg(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(function () { toast.classList.remove('show'); }, 2000);
+  }
+
+  // 复刻脚本 parse_json_string_field：字符串则 JSON.parse，空则 []
+  function parseJsonStringField(value) {
+    if (typeof value === 'string' && value.trim()) {
+      try { return JSON.parse(value); }
+      catch (e) { return []; }
+    }
+    if (value === null || value === undefined || value === '') return [];
+    return value;
+  }
+
+  // 复刻脚本 simplify_rep_laps：删除 rep 时间戳/核心稳定度字段
+  function simplifyRepLaps(repLaps) {
+    if (!Array.isArray(repLaps)) return [];
+    return repLaps.map(function (lap) {
+      var clean = {};
+      Object.keys(lap || {}).forEach(function (k) {
+        if (k === 'rep_start_ms' || k === 'rep_end_ms' || k === 'rep_core_stability') return;
+        clean[k] = lap[k];
+      });
+      return clean;
+    });
+  }
+
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> field_N
+  function parseTimelineValue(value) {
+    if (typeof value !== 'string' || !value.trim()) return [];
+    var items = [];
+    value.split(';').forEach(function (rawItem) {
+      rawItem = rawItem.trim();
+      if (!rawItem) return;
+      var parts = rawItem.split(',').map(function (p) { return p.trim(); });
+      var row = {};
+      parts.forEach(function (part, idx) {
+        row['field_' + (idx + 1)] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+      });
+      items.push(row);
+    });
+    return items;
+  }
+
+  // 提取对象数组的所有键（保持出现顺序）
+  function collectKeys(rows) {
+    var keys = [];
+    var seen = {};
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (!row || typeof row !== 'object') return;
+      Object.keys(row).forEach(function (k) {
+        if (!seen[k]) { seen[k] = true; keys.push(k); }
+      });
+    });
+    return keys;
+  }
+
+  function formatCell(val) {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') {
+      try { return JSON.stringify(val); } catch (e) { return String(val); }
+    }
+    return String(val);
+  }
+
+  // ---- 渲染 ----
+  function renderTable(rows) {
+    var rowsArr = Array.isArray(rows) ? rows : [];
+    if (rowsArr.length === 0) {
+      tableWrap.innerHTML = '<div class="empty">暂无数据</div>';
+      return;
+    }
+    var keys = collectKeys(rowsArr);
+    var html = '<table><thead><tr><th style="min-width:48px">#</th>';
+    keys.forEach(function (k) { html += '<th>' + k.replace(/</g,'&lt;') + '</th>'; });
+    html += '</tr></thead><tbody>';
+    rowsArr.forEach(function (row, i) {
+      html += '<tr><td>' + (i + 1) + '</td>';
+      keys.forEach(function (k) {
+        html += '<td>' + formatCell(row[k]).replace(/</g,'&lt;') + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    tableWrap.innerHTML = html;
+  }
+
+  function renderSummary() {
+    if (!filesData[activeFile]) return;
+    var d = filesData[activeFile];
+    var items = [
+      { label: '文件', value: activeFile },
+      { label: 'hyroxRepLap 条数', value: (d.repLap || []).length },
+      { label: 'hyroxCounting 条数', value: (d.counting || []).length },
+      { label: 'hyroxTimelines 条数', value: (d.timelines || []).length },
+      { label: 'RepLap 列数', value: collectKeys(d.repLap).length },
+      { label: 'Counting 列数', value: collectKeys(d.counting).length }
+    ];
+    summaryGrid.innerHTML = items.map(function (it) {
+      return '<div class="summary-item"><div class="label">' + it.label +
+             '</div><div class="value">' + it.value + '</div></div>';
+    }).join('');
+  }
+
+  function render() {
+    if (!activeFile || !filesData[activeFile]) return;
+    var d = filesData[activeFile];
+    var rows;
+    if (activeTab === 'hyroxRepLap') rows = d.repLap;
+    else if (activeTab === 'hyroxCounting') rows = d.counting;
+    else rows = d.timelines;
+    renderTable(rows);
+    renderSummary();
+    // 更新 tab 计数
+    $('cntRepLap').textContent = (d.repLap || []).length;
+    $('cntCounting').textContent = (d.counting || []).length;
+    $('cntTimelines').textContent = (d.timelines || []).length;
+    // 更新文件下拉
+    fileSelector.value = activeFile;
+    metaInfo.textContent = '当前文件: ' + activeFile;
+  }
+
+  // ---- 文件解析 ----
+  function parseFile(file) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var obj = JSON.parse(ev.target.result);
+        var repLapRaw = parseJsonStringField(obj.hyroxRepLap);
+        var counting = parseJsonStringField(obj.hyroxCounting);
+        var timelines = parseTimelineValue(obj.hyroxTimelines);
+        filesData[file.name] = {
+          repLap: simplifyRepLaps(repLapRaw),
+          counting: counting,
+          timelines: timelines,
+          raw: obj
+        };
+        markFileStatus(file.name, true, '');
+        if (!activeFile) activeFile = file.name;
+        populateFileSelector();
+        render();
+        toastMsg('已解析: ' + file.name);
+      } catch (err) {
+        markFileStatus(file.name, false, '解析失败: ' + err.message);
+      }
+    };
+    reader.onerror = function () { markFileStatus(file.name, false, '读取失败'); };
+    reader.readAsText(file);
+  }
+
+  function handleFiles(fileList) {
+    Array.prototype.forEach.call(fileList, function (file) {
+      addFileItem(file.name);
+      parseFile(file);
+    });
+  }
+
+  function addFileItem(name) {
+    if (document.querySelector('.file-item[data-name="' + name.replace(/"/g, '&quot;') + '"]')) return;
+    var div = document.createElement('div');
+    div.className = 'file-item';
+    div.setAttribute('data-name', name);
+    div.innerHTML = '<span class="name">' + name.replace(/</g,'&lt;') + '</span>' +
+                    '<span class="status">解析中…</span>';
+    fileList.appendChild(div);
+  }
+
+  function markFileStatus(name, ok, msg) {
+    var el = fileList.querySelector('.file-item[data-name="' + name.replace(/"/g, '&quot;') + '"]');
+    if (!el) return;
+    var st = el.querySelector('.status');
+    if (ok) {
+      st.className = 'status ok';
+      st.textContent = '✓ 已解析 (' + Object.keys(filesData[name] || {}).length + ')';
+    } else {
+      st.className = 'status err';
+      st.textContent = '✗ ' + msg;
+    }
+  }
+
+  function populateFileSelector() {
+    fileSelector.innerHTML = '';
+    Object.keys(filesData).forEach(function (name) {
+      var opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      fileSelector.appendChild(opt);
+    });
+    fileSelector.value = activeFile;
+    viewerCard.style.display = Object.keys(filesData).length ? 'block' : 'none';
+  }
+
+  // ---- 下载格式化 JSON（复刻脚本输出）----
+  function downloadFormatted() {
+    if (!filesData[activeFile]) return;
+    var base = activeFile.replace(/_sport_detail\.(json|txt)$/i, '').replace(/\.(json|txt)$/i, '');
+    var d = filesData[activeFile];
+    var payloads = [
+      { name: base + '.hyroxRepLap.formatted.json', data: { hyroxRepLap: d.repLap } },
+      { name: base + '.hyroxCounting.formatted.json', data: { hyroxCounting: d.counting } },
+      { name: base + '.hyroxTimelines.formatted.json', data: { hyroxTimelines: d.timelines } }
+    ];
+    payloads.forEach(function (p) {
+      var blob = new Blob([JSON.stringify(p.data, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = p.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    });
+    toastMsg('已下载 3 个格式化 JSON');
+  }
+
+  // ---- 事件绑定 ----
+  dropZone.addEventListener('click', function () { fileInput.click(); });
+  dropZone.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', function () { dropZone.classList.remove('dragover'); });
+  dropZone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function (e) {
+    handleFiles(e.target.files);
+    fileInput.value = '';
+  });
+  tabsEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.tab');
+    if (!btn) return;
+    activeTab = btn.getAttribute('data-key');
+    Array.prototype.forEach.call(tabsEl.querySelectorAll('.tab'), function (t) {
+      t.classList.toggle('active', t === btn);
+    });
+    render();
+  });
+  fileSelector.addEventListener('change', function () {
+    activeFile = fileSelector.value;
+    render();
+  });
+  $('btnDownload').addEventListener('click', downloadFormatted);
+
+})();
+</script>
+</body>
+</html>
