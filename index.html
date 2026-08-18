@@ -69,21 +69,14 @@
     border-bottom: 2px solid transparent; margin-bottom: -2px;
   }
   .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-  .tab .tag-badge {
-    background: #eef2f7; color: #516172; border-radius: 4px;
-    padding: 1px 6px; font-size: 11px; margin-left: 6px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    border: 1px solid #d8dde6;
-  }
-  .tab.active .tag-badge {
-    background: #e0ebff; color: #1d4ed8; border-color: #c7d8fe;
-  }
   .tab .count {
     background: var(--header-bg); color: var(--muted); border-radius: 10px;
     padding: 1px 8px; font-size: 12px; margin-left: 6px;
   }
   .tab.active .count { background: #e3edff; color: var(--primary); }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 0 0; }
+  .toolbar-label { font-size: 12px; color: var(--muted); }
+  .toolbar .sep { width: 1px; height: 20px; background: var(--border); }
   .btn {
     background: var(--primary); color: #fff; border: none; border-radius: 6px;
     padding: 8px 14px; font-size: 13px; cursor: pointer; font-weight: 500;
@@ -128,7 +121,8 @@
   <div class="header">
     <h1>HYROX Sport Detail 查看器</h1>
     <p>选择 <code>_sport_detail.json</code> 文件，浏览器本地解析并展示
-       <code>hyroxRepLap</code> / <code>hyroxCounting</code> / <code>hyroxTimelines</code> 三个字段的表格。
+       <code>hyroxRepLap</code> / <code>hyroxCounting</code> / <code>hyroxTimelines</code> 三个字段的表格，
+       可导出格式化 JSON 或 Excel（.xlsx，三个 Sheet）。
        逻辑与 <code>format_hyrox_structures.py</code> 对齐（删除 rep 时间戳字段、timelines 拆分）。数据不离开本机。</p>
   </div>
 
@@ -144,13 +138,15 @@
 
   <div class="card" id="viewerCard" style="display:none">
     <div class="tabs" id="tabs">
-      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="tag-badge">0x0E1F</span><span class="count" id="cntRepLap">0</span></button>
-      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="tag-badge">0x131F</span><span class="count" id="cntCounting">0</span></button>
-      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="tag-badge">0x121F</span><span class="count" id="cntTimelines">0</span></button>
+      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="count" id="cntRepLap">0</span></button>
+      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="count" id="cntCounting">0</span></button>
+      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="count" id="cntTimelines">0</span></button>
     </div>
     <div class="toolbar">
       <select id="fileSelector" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff"></select>
-      <button class="btn secondary" id="btnDownload">下载格式化 JSON</button>
+      <span class="toolbar-label">导出</span>
+      <button class="btn secondary" id="btnDownload">格式化 JSON</button>
+      <button class="btn secondary" id="btnExcel">Excel (.xlsx)</button>
     </div>
     <div class="summary-grid" id="summaryGrid"></div>
     <div class="table-wrap" id="tableWrap"></div>
@@ -210,18 +206,7 @@
     });
   }
 
-  // hyroxTimelines 每行 7 列，对应 sport_node_hyrox_result_t 的字段（按顺序）
-  var TIMELINE_FIELDS = [
-    'hyrox_type',   // 分段类型，站点 HYROX_SPORT_TYPE
-    'finished',     // 是否完成分段
-    'use_time',     // 本次训练完成时间，单位毫秒
-    'avgPace',      // 本段平均配速，单位：秒/公里
-    'elapsedTime',  // 截止到当前环节的运动时长，单位毫秒
-    'insight',      // 当前分段 insight 评分（可为负）
-    'round'         // 当前 round 序号，从 1~n
-  ];
-
-  // 分号分隔 -> 逗号分隔 -> 映射到 sport_node_hyrox_result_t 字段名
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> field_N
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -231,8 +216,7 @@
       var parts = rawItem.split(',').map(function (p) { return p.trim(); });
       var row = {};
       parts.forEach(function (part, idx) {
-        var key = (idx < TIMELINE_FIELDS.length) ? TIMELINE_FIELDS[idx] : ('field_' + (idx + 1));
-        row[key] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+        row['field_' + (idx + 1)] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
       });
       items.push(row);
     });
@@ -410,6 +394,233 @@
     toastMsg('已下载 3 个格式化 JSON');
   }
 
+  // ---- 极简 .xlsx 生成器（ZIP STORE + SpreadsheetML，纯前端无依赖）----
+  var CRC_TABLE = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(data) {
+    var c = 0xFFFFFFFF;
+    for (var i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  // files: [{ name: string, data: Uint8Array }]，按 STORE（无压缩）打包 ZIP
+  function buildZip(files) {
+    var enc = new TextEncoder();
+    var chunks = [];
+    var central = [];
+    var offset = 0;
+    function push(a) { chunks.push(a); }
+
+    files.forEach(function (f) {
+      var nameBytes = enc.encode(f.name);
+      var crc = crc32(f.data);
+      var size = f.data.length;
+
+      var lfh = new DataView(new ArrayBuffer(30));
+      lfh.setUint32(0, 0x04034b50, true);
+      lfh.setUint16(4, 20, true);
+      lfh.setUint16(6, 0x0800, true);   // UTF-8 文件名
+      lfh.setUint16(8, 0, true);        // method: store
+      lfh.setUint16(10, 0, true); lfh.setUint16(12, 0, true);
+      lfh.setUint32(14, crc, true);
+      lfh.setUint32(18, size, true);
+      lfh.setUint32(22, size, true);
+      lfh.setUint16(26, nameBytes.length, true);
+      lfh.setUint16(28, 0, true);
+      push(new Uint8Array(lfh.buffer));
+      push(nameBytes);
+      push(f.data);
+
+      var cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true);
+      cd.setUint16(4, 20, true); cd.setUint16(6, 20, true);
+      cd.setUint16(8, 0x0800, true);
+      cd.setUint16(10, 0, true);
+      cd.setUint16(12, 0, true); cd.setUint16(14, 0, true);
+      cd.setUint32(16, crc, true);
+      cd.setUint32(20, size, true);
+      cd.setUint32(24, size, true);
+      cd.setUint16(28, nameBytes.length, true);
+      cd.setUint16(30, 0, true); cd.setUint16(32, 0, true);
+      cd.setUint16(34, 0, true); cd.setUint16(36, 0, true);
+      cd.setUint32(38, 0, true);
+      cd.setUint32(42, offset, true);
+      central.push(new Uint8Array(cd.buffer));
+      central.push(nameBytes);
+
+      offset += 30 + nameBytes.length + size;
+    });
+
+    var cdStart = offset;
+    chunks = chunks.concat(central);
+    var cdSize = chunks.reduce(function (s, c) { return s + c.length; }, 0) - cdStart;
+
+    var eocd = new DataView(new ArrayBuffer(22));
+    eocd.setUint32(0, 0x06054b50, true);
+    eocd.setUint16(4, 0, true); eocd.setUint16(6, 0, true);
+    eocd.setUint16(8, files.length, true); eocd.setUint16(10, files.length, true);
+    eocd.setUint32(12, cdSize, true);
+    eocd.setUint32(16, cdStart, true);
+    eocd.setUint16(20, 0, true);
+    chunks.push(new Uint8Array(eocd.buffer));
+
+    var total = 0;
+    chunks.forEach(function (c) { total += c.length; });
+    var out = new Uint8Array(total);
+    var pos = 0;
+    chunks.forEach(function (c) { out.set(c, pos); pos += c.length; });
+    return out;
+  }
+
+  function xmlEscape(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+
+  function colLetter(i) { // 1-based -> A, B, ... Z, AA ...
+    var s = '';
+    while (i > 0) {
+      var m = (i - 1) % 26;
+      s = String.fromCharCode(65 + m) + s;
+      i = Math.floor((i - 1) / 26);
+    }
+    return s;
+  }
+
+  function sheetXml(sheetName, rows) {
+    var rowsArr = Array.isArray(rows) ? rows : [];
+    var keys = collectKeys(rowsArr);
+    var cols = [];
+    var widths = keys.map(function (k) { return Math.min(45, Math.max(k.length + 2, 10)); });
+    rowsArr.forEach(function (row) {
+      keys.forEach(function (k, i) {
+        var len = formatCell(row[k]).length;
+        if (len + 2 > widths[i]) widths[i] = Math.min(50, len + 2);
+      });
+    });
+    widths.forEach(function (w, i) {
+      cols.push('<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>');
+    });
+
+    var L = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      '<cols>', cols.join(''), '</cols>', '<sheetData>'];
+    // 表头（加粗 s="1"）
+    var header = ['<c r="A1" t="inlineStr" s="1"><is><t>#</t></is></c>'];
+    keys.forEach(function (k, i) {
+      header.push('<c r="' + colLetter(i + 2) + '1" t="inlineStr" s="1"><is><t>' + xmlEscape(k) + '</t></is></c>');
+    });
+    L.push('<row r="1">' + header.join('') + '</row>');
+    rowsArr.forEach(function (row, ri) {
+      var r = ri + 2;
+      var cells = ['<c r="A' + r + '" t="inlineStr"><is><t>' + (ri + 1) + '</t></is></c>'];
+      keys.forEach(function (k, ci) {
+        var ref = colLetter(ci + 2) + r;
+        var val = row[k];
+        if (typeof val === 'number' && isFinite(val)) {
+          cells.push('<c r="' + ref + '"><v>' + val + '</v></c>');
+        } else {
+          cells.push('<c r="' + ref + '" t="inlineStr"><is><t>' + xmlEscape(formatCell(val)) + '</t></is></c>');
+        }
+      });
+      L.push('<row r="' + r + '">' + cells.join('') + '</row>');
+    });
+    L.push('</sheetData></worksheet>');
+    return L.join('');
+  }
+
+  function workbookXml(sheets) {
+    var L = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      '<sheets>'];
+    sheets.forEach(function (s, i) {
+      L.push('<sheet name="' + xmlEscape(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>');
+    });
+    L.push('</sheets></workbook>');
+    return L.join('');
+  }
+
+  function workbookRelsXml(count) {
+    var L = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'];
+    for (var i = 1; i <= count; i++) {
+      L.push('<Relationship Id="rId' + i + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + i + '.xml"/>');
+    }
+    L.push('<Relationship Id="rId' + (count + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>');
+    L.push('</Relationships>');
+    return L.join('');
+  }
+
+  function contentTypesXml(count) {
+    var L = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+      '<Default Extension="xml" ContentType="application/xml"/>',
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'];
+    for (var i = 1; i <= count; i++) {
+      L.push('<Override PartName="/xl/worksheets/sheet' + i + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+    }
+    L.push('<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>');
+    L.push('</Types>');
+    return L.join('');
+  }
+
+  function stylesXml() {
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+      '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+      '</styleSheet>';
+  }
+
+  function downloadExcel() {
+    if (!filesData[activeFile]) return;
+    var base = activeFile.replace(/_sport_detail\.(json|txt)$/i, '').replace(/\.(json|txt)$/i, '');
+    var d = filesData[activeFile];
+    var sheets = [
+      { name: 'hyroxRepLap', rows: d.repLap },
+      { name: 'hyroxCounting', rows: d.counting },
+      { name: 'hyroxTimelines', rows: d.timelines }
+    ];
+    var enc = new TextEncoder();
+    var zipFiles = [
+      { name: '[Content_Types].xml', data: enc.encode(contentTypesXml(sheets.length)) },
+      { name: '_rels/.rels', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+        '</Relationships>') },
+      { name: 'xl/workbook.xml', data: enc.encode(workbookXml(sheets)) },
+      { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(workbookRelsXml(sheets.length)) },
+      { name: 'xl/styles.xml', data: enc.encode(stylesXml()) }
+    ];
+    sheets.forEach(function (s, i) {
+      zipFiles.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: enc.encode(sheetXml(s.name, s.rows)) });
+    });
+    var zip = buildZip(zipFiles);
+    var blob = new Blob([zip], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = base + '.formatted.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toastMsg('已下载 Excel: ' + a.download);
+  }
+
   // ---- 事件绑定 ----
   dropZone.addEventListener('click', function () { fileInput.click(); });
   dropZone.addEventListener('dragover', function (e) {
@@ -440,6 +651,7 @@
     render();
   });
   $('btnDownload').addEventListener('click', downloadFormatted);
+  $('btnExcel').addEventListener('click', downloadExcel);
 
 })();
 </script>
