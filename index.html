@@ -69,6 +69,15 @@
     border-bottom: 2px solid transparent; margin-bottom: -2px;
   }
   .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab .tag-badge {
+    background: #eef2f7; color: #516172; border-radius: 4px;
+    padding: 1px 6px; font-size: 11px; margin-left: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    border: 1px solid #d8dde6;
+  }
+  .tab.active .tag-badge {
+    background: #e0ebff; color: #1d4ed8; border-color: #c7d8fe;
+  }
   .tab .count {
     background: var(--header-bg); color: var(--muted); border-radius: 10px;
     padding: 1px 8px; font-size: 12px; margin-left: 6px;
@@ -135,9 +144,9 @@
 
   <div class="card" id="viewerCard" style="display:none">
     <div class="tabs" id="tabs">
-      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="count" id="cntRepLap">0</span></button>
-      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="count" id="cntCounting">0</span></button>
-      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="count" id="cntTimelines">0</span></button>
+      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="tag-badge">0x0E1F</span><span class="count" id="cntRepLap">0</span></button>
+      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="tag-badge">0x131F</span><span class="count" id="cntCounting">0</span></button>
+      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="tag-badge">0x121F</span><span class="count" id="cntTimelines">0</span></button>
     </div>
     <div class="toolbar">
       <select id="fileSelector" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff"></select>
