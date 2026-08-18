@@ -201,7 +201,18 @@
     });
   }
 
-  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> field_N
+  // hyroxTimelines 每行 7 列，对应 sport_node_hyrox_result_t 的字段（按顺序）
+  var TIMELINE_FIELDS = [
+    'hyrox_type',   // 分段类型，站点 HYROX_SPORT_TYPE
+    'finished',     // 是否完成分段
+    'use_time',     // 本次训练完成时间，单位毫秒
+    'avgPace',      // 本段平均配速，单位：秒/公里
+    'elapsedTime',  // 截止到当前环节的运动时长，单位毫秒
+    'insight',      // 当前分段 insight 评分（可为负）
+    'round'         // 当前 round 序号，从 1~n
+  ];
+
+  // 分号分隔 -> 逗号分隔 -> 映射到 sport_node_hyrox_result_t 字段名
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -211,7 +222,8 @@
       var parts = rawItem.split(',').map(function (p) { return p.trim(); });
       var row = {};
       parts.forEach(function (part, idx) {
-        row['field_' + (idx + 1)] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+        var key = (idx < TIMELINE_FIELDS.length) ? TIMELINE_FIELDS[idx] : ('field_' + (idx + 1));
+        row[key] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
       });
       items.push(row);
     });
