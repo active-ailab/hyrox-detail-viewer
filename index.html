@@ -214,12 +214,15 @@
     'cardiac_status', 'muscular_status', 'control_status', 'version',
     'window_stroke_rates_count', 'group_durations_count',
     'window_stroke_rates', 'group_durations'];
-  // 0x121F sport_node_hyrox_result_t
+  // 0x121F sport_node_hyrox_result_t（显示顺序，严格按协议文档）
   var TIMELINE_FIELDS = ['index', 'hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
+  // 实际数据字符串 hyroxTimelines 的字段顺序：0x121F 结构体顺序去掉 index
+  // （设备导出格式：[hyrox_type, finished, use_time, avgPace, elapsedTime, insight, round]）
+  var TIMELINE_DATA_ORDER = ['hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
   var TAB_FIELDS = { hyroxRepLap: REP_LAP_FIELDS, hyroxCounting: COUNTING_FIELDS, hyroxTimelines: TIMELINE_FIELDS };
 
-  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 严格按 0x121F 协议顺序映射字段
-  // 超出协议字段数量的部分直接忽略（文档中没有的字段不显示）
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 按实际数据字段顺序解析，
+  // 显示列仍按 TIMELINE_FIELDS（协议顺序）重排；超出实际字段数量的部分直接忽略
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -229,8 +232,8 @@
       var parts = rawItem.split(',').map(function (p) { return p.trim(); });
       var row = {};
       parts.forEach(function (part, idx) {
-        if (idx >= TIMELINE_FIELDS.length) return;
-        row[TIMELINE_FIELDS[idx]] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+        if (idx >= TIMELINE_DATA_ORDER.length) return;
+        row[TIMELINE_DATA_ORDER[idx]] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
       });
       items.push(row);
     });
@@ -324,8 +327,30 @@
         var repLapRaw = parseJsonStringField(obj.hyroxRepLap);
         var counting = parseJsonStringField(obj.hyroxCounting);
         var timelines = parseTimelineValue(obj.hyroxTimelines);
+        // rep 行键名对齐协议字段：设备 JSON 用 weight，协议文档为 equipment_weight
+        var repLap = (Array.isArray(repLapRaw) && repLapRaw.length > 0 && typeof repLapRaw[0] === 'object')
+          ? repLapRaw.map(function (row) {
+              var r = row || {};
+              if ('weight' in r && !('equipment_weight' in r)) {
+                r.equipment_weight = r.weight;
+                delete r.weight;
+              }
+              return r;
+            }) : [];
+        // counting 按协议补齐 count 字段：window_stroke_rates_count/group_durations_count
+        // 数据中未显式存储，按协议从数组长度派生（无数据为 0）
+        counting = (Array.isArray(counting) ? counting : []).map(function (row) {
+          var r = row || {};
+          if (!('window_stroke_rates_count' in r)) {
+            r.window_stroke_rates_count = Array.isArray(r.window_stroke_rates) ? r.window_stroke_rates.length : 0;
+          }
+          if (!('group_durations_count' in r)) {
+            r.group_durations_count = Array.isArray(r.group_durations) ? r.group_durations.length : 0;
+          }
+          return r;
+        });
         filesData[file.name] = {
-          repLap: (Array.isArray(repLapRaw) && repLapRaw.length > 0 && typeof repLapRaw[0] === 'object') ? repLapRaw : [],
+          repLap: repLap,
           counting: counting,
           timelines: timelines,
           raw: obj
