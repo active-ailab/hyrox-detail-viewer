@@ -199,24 +199,11 @@
     return value;
   }
 
-  // 复刻脚本 simplify_rep_laps：删除 rep 时间戳/核心稳定度字段
-  function simplifyRepLaps(repLaps) {
-    if (!Array.isArray(repLaps)) return [];
-    return repLaps.map(function (lap) {
-      var clean = {};
-      Object.keys(lap || {}).forEach(function (k) {
-        if (k === 'rep_start_ms' || k === 'rep_end_ms' || k === 'rep_core_stability') return;
-        clean[k] = lap[k];
-      });
-      return clean;
-    });
-  }
-
-  // ---- 协议字段顺序（严格按飞书文档 & sport_record_save_detail.h，不按 JSON 位置）----
-  // 0x0E1F sport_node_hyrox_rep_lap_t（已剔除 rep_start_ms/rep_end_ms/rep_core_stability 时间戳/稳定度字段）
-  var REP_LAP_FIELDS = ['relative_time', 'equipment_weight', 'rest_time', 'rep_count',
-    'rep_core_count', 'hyrox_type', 'lap_time', 'rep_core_feature_count',
-    'core_stability_feature1', 'core_stability_feature2', 'core_stability_feature3'];
+  // ---- 协议字段顺序（严格按飞书文档，不按 JSON 位置；文档中没有的字段不显示）----
+  // 0x0E1F sport_node_hyrox_rep_lap_t（去除 tag/length/relative_time 后）
+  var REP_LAP_FIELDS = ['equipment_weight', 'rest_time', 'rep_count',
+    'rep_start_ms', 'rep_end_ms', 'rep_core_count', 'rep_core_stability',
+    'hyrox_type', 'lap_time'];
   // 0x131F sport_node_hyrox_counting_t
   var COUNTING_FIELDS = ['hyrox_type', 'rep_count', 'lap_time',
     'high_heart_rate_duration', 'heart_rate_rise', 'average_heart_rate', 'peak_heart_rate',
@@ -231,7 +218,8 @@
   var TIMELINE_FIELDS = ['index', 'hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
   var TAB_FIELDS = { hyroxRepLap: REP_LAP_FIELDS, hyroxCounting: COUNTING_FIELDS, hyroxTimelines: TIMELINE_FIELDS };
 
-  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 按 0x121F 协议顺序映射字段
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 严格按 0x121F 协议顺序映射字段
+  // 超出协议字段数量的部分直接忽略（文档中没有的字段不显示）
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -241,26 +229,23 @@
       var parts = rawItem.split(',').map(function (p) { return p.trim(); });
       var row = {};
       parts.forEach(function (part, idx) {
-        var key = (idx < TIMELINE_FIELDS.length) ? TIMELINE_FIELDS[idx] : ('field_' + (idx + 1));
-        row[key] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+        if (idx >= TIMELINE_FIELDS.length) return;
+        row[TIMELINE_FIELDS[idx]] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
       });
       items.push(row);
     });
     return items;
   }
 
-  // 按协议字段顺序提取列；JSON 中多出的未知 key 按出现顺序追加在末尾
+  // 按协议字段顺序提取列；只保留 JSON 中实际存在的协议字段，未知字段过滤掉
   function orderKeys(rows, fields) {
     var seen = {};
     var keys = [];
     (fields || []).forEach(function (k) {
-      if (!seen[k]) { seen[k] = true; keys.push(k); }
-    });
-    (Array.isArray(rows) ? rows : []).forEach(function (row) {
-      if (!row || typeof row !== 'object') return;
-      Object.keys(row).forEach(function (k) {
-        if (!seen[k]) { seen[k] = true; keys.push(k); }
+      var hasField = (Array.isArray(rows) ? rows : []).some(function (row) {
+        return row && typeof row === 'object' && k in row;
       });
+      if (hasField && !seen[k]) { seen[k] = true; keys.push(k); }
     });
     return keys;
   }
@@ -340,7 +325,7 @@
         var counting = parseJsonStringField(obj.hyroxCounting);
         var timelines = parseTimelineValue(obj.hyroxTimelines);
         filesData[file.name] = {
-          repLap: simplifyRepLaps(repLapRaw),
+          repLap: (Array.isArray(repLapRaw) && repLapRaw.length > 0 && typeof repLapRaw[0] === 'object') ? repLapRaw : [],
           counting: counting,
           timelines: timelines,
           raw: obj
