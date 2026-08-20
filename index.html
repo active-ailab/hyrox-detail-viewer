@@ -74,6 +74,12 @@
     padding: 1px 8px; font-size: 12px; margin-left: 6px;
   }
   .tab.active .count { background: #e3edff; color: var(--primary); }
+  .tab .tag-badge {
+    font-family: "SF Mono", "Consolas", "Menlo", monospace;
+    font-size: 11px; color: #9ca3af; background: #f3f4f6;
+    border-radius: 4px; padding: 1px 6px; margin-left: 6px;
+  }
+  .tab.active .tag-badge { background: #dbeafe; color: var(--primary); }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 0 0; }
   .toolbar-label { font-size: 12px; color: var(--muted); }
   .toolbar .sep { width: 1px; height: 20px; background: var(--border); }
@@ -138,9 +144,9 @@
 
   <div class="card" id="viewerCard" style="display:none">
     <div class="tabs" id="tabs">
-      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="count" id="cntRepLap">0</span></button>
-      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="count" id="cntCounting">0</span></button>
-      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="count" id="cntTimelines">0</span></button>
+      <button class="tab active" data-key="hyroxRepLap">hyroxRepLap<span class="tag-badge">0x0E1F</span><span class="count" id="cntRepLap">0</span></button>
+      <button class="tab" data-key="hyroxCounting">hyroxCounting<span class="tag-badge">0x131F</span><span class="count" id="cntCounting">0</span></button>
+      <button class="tab" data-key="hyroxTimelines">hyroxTimelines<span class="tag-badge">0x121F</span><span class="count" id="cntTimelines">0</span></button>
     </div>
     <div class="toolbar">
       <select id="fileSelector" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff"></select>
@@ -206,7 +212,8 @@
     });
   }
 
-  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> field_N
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 映射 sport_node_hyrox_result_t 后 7 字段
+  var TIMELINE_FIELDS = ['hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -216,7 +223,8 @@
       var parts = rawItem.split(',').map(function (p) { return p.trim(); });
       var row = {};
       parts.forEach(function (part, idx) {
-        row['field_' + (idx + 1)] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
+        var key = (idx < TIMELINE_FIELDS.length) ? TIMELINE_FIELDS[idx] : ('field_' + (idx + 1));
+        row[key] = (/^-?\d+$/.test(part)) ? parseInt(part, 10) : part;
       });
       items.push(row);
     });
