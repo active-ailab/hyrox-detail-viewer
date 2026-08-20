@@ -212,8 +212,26 @@
     });
   }
 
-  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 映射 sport_node_hyrox_result_t 后 7 字段
-  var TIMELINE_FIELDS = ['hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
+  // ---- 协议字段顺序（严格按飞书文档 & sport_record_save_detail.h，不按 JSON 位置）----
+  // 0x0E1F sport_node_hyrox_rep_lap_t（已剔除 rep_start_ms/rep_end_ms/rep_core_stability 时间戳/稳定度字段）
+  var REP_LAP_FIELDS = ['relative_time', 'equipment_weight', 'rest_time', 'rep_count',
+    'rep_core_count', 'hyrox_type', 'lap_time', 'rep_core_feature_count',
+    'core_stability_feature1', 'core_stability_feature2', 'core_stability_feature3'];
+  // 0x131F sport_node_hyrox_counting_t
+  var COUNTING_FIELDS = ['hyrox_type', 'rep_count', 'lap_time',
+    'high_heart_rate_duration', 'heart_rate_rise', 'average_heart_rate', 'peak_heart_rate',
+    'average_stroke_rate', 'stroke_rate_variability', 'stroke_rate_decay',
+    'average_rhythm', 'output_change', 'rhythm_drop', 'rhythm_range',
+    'rhythm_shift', 'rhythm_shift_index', 'break_count', 'last_segment_is_complete',
+    'movement_insight', 'rhythm_insight', 'cardio_insight', 'next_priority_insight', 'insight_level',
+    'cardiac_status', 'muscular_status', 'control_status', 'version',
+    'window_stroke_rates_count', 'group_durations_count',
+    'window_stroke_rates', 'group_durations'];
+  // 0x121F sport_node_hyrox_result_t
+  var TIMELINE_FIELDS = ['index', 'hyrox_type', 'finished', 'use_time', 'avgPace', 'elapsedTime', 'insight', 'round'];
+  var TAB_FIELDS = { hyroxRepLap: REP_LAP_FIELDS, hyroxCounting: COUNTING_FIELDS, hyroxTimelines: TIMELINE_FIELDS };
+
+  // 复刻脚本 parse_timeline_value：分号分隔 -> 逗号分隔 -> 按 0x121F 协议顺序映射字段
   function parseTimelineValue(value) {
     if (typeof value !== 'string' || !value.trim()) return [];
     var items = [];
@@ -231,10 +249,13 @@
     return items;
   }
 
-  // 提取对象数组的所有键（保持出现顺序）
-  function collectKeys(rows) {
-    var keys = [];
+  // 按协议字段顺序提取列；JSON 中多出的未知 key 按出现顺序追加在末尾
+  function orderKeys(rows, fields) {
     var seen = {};
+    var keys = [];
+    (fields || []).forEach(function (k) {
+      if (!seen[k]) { seen[k] = true; keys.push(k); }
+    });
     (Array.isArray(rows) ? rows : []).forEach(function (row) {
       if (!row || typeof row !== 'object') return;
       Object.keys(row).forEach(function (k) {
@@ -253,13 +274,13 @@
   }
 
   // ---- 渲染 ----
-  function renderTable(rows) {
+  function renderTable(rows, fields) {
     var rowsArr = Array.isArray(rows) ? rows : [];
     if (rowsArr.length === 0) {
       tableWrap.innerHTML = '<div class="empty">暂无数据</div>';
       return;
     }
-    var keys = collectKeys(rowsArr);
+    var keys = orderKeys(rowsArr, fields);
     var html = '<table><thead><tr><th style="min-width:48px">#</th>';
     keys.forEach(function (k) { html += '<th>' + k.replace(/</g,'&lt;') + '</th>'; });
     html += '</tr></thead><tbody>';
@@ -282,8 +303,8 @@
       { label: 'hyroxRepLap 条数', value: (d.repLap || []).length },
       { label: 'hyroxCounting 条数', value: (d.counting || []).length },
       { label: 'hyroxTimelines 条数', value: (d.timelines || []).length },
-      { label: 'RepLap 列数', value: collectKeys(d.repLap).length },
-      { label: 'Counting 列数', value: collectKeys(d.counting).length }
+      { label: 'RepLap 列数', value: orderKeys(d.repLap, REP_LAP_FIELDS).length },
+      { label: 'Counting 列数', value: orderKeys(d.counting, COUNTING_FIELDS).length }
     ];
     summaryGrid.innerHTML = items.map(function (it) {
       return '<div class="summary-item"><div class="label">' + it.label +
@@ -298,7 +319,7 @@
     if (activeTab === 'hyroxRepLap') rows = d.repLap;
     else if (activeTab === 'hyroxCounting') rows = d.counting;
     else rows = d.timelines;
-    renderTable(rows);
+    renderTable(rows, TAB_FIELDS[activeTab]);
     renderSummary();
     // 更新 tab 计数
     $('cntRepLap').textContent = (d.repLap || []).length;
@@ -379,15 +400,24 @@
     viewerCard.style.display = Object.keys(filesData).length ? 'block' : 'none';
   }
 
-  // ---- 下载格式化 JSON（复刻脚本输出）----
+  // ---- 下载格式化 JSON（复刻脚本输出；行内 key 按协议字段顺序重排）----
+  function reorderRows(rows, fields) {
+    var keys = orderKeys(rows, fields);
+    return (Array.isArray(rows) ? rows : []).map(function (row) {
+      var o = {};
+      keys.forEach(function (k) { o[k] = row[k]; });
+      return o;
+    });
+  }
+
   function downloadFormatted() {
     if (!filesData[activeFile]) return;
     var base = activeFile.replace(/_sport_detail\.(json|txt)$/i, '').replace(/\.(json|txt)$/i, '');
     var d = filesData[activeFile];
     var payloads = [
-      { name: base + '.hyroxRepLap.formatted.json', data: { hyroxRepLap: d.repLap } },
-      { name: base + '.hyroxCounting.formatted.json', data: { hyroxCounting: d.counting } },
-      { name: base + '.hyroxTimelines.formatted.json', data: { hyroxTimelines: d.timelines } }
+      { name: base + '.hyroxRepLap.formatted.json', data: { hyroxRepLap: reorderRows(d.repLap, REP_LAP_FIELDS) } },
+      { name: base + '.hyroxCounting.formatted.json', data: { hyroxCounting: reorderRows(d.counting, COUNTING_FIELDS) } },
+      { name: base + '.hyroxTimelines.formatted.json', data: { hyroxTimelines: reorderRows(d.timelines, TIMELINE_FIELDS) } }
     ];
     payloads.forEach(function (p) {
       var blob = new Blob([JSON.stringify(p.data, null, 2)], { type: 'application/json' });
@@ -503,9 +533,9 @@
     return s;
   }
 
-  function sheetXml(sheetName, rows) {
+  function sheetXml(sheetName, rows, fields) {
     var rowsArr = Array.isArray(rows) ? rows : [];
-    var keys = collectKeys(rowsArr);
+    var keys = orderKeys(rowsArr, fields);
     var cols = [];
     var widths = keys.map(function (k) { return Math.min(45, Math.max(k.length + 2, 10)); });
     rowsArr.forEach(function (row) {
@@ -599,9 +629,9 @@
     var base = activeFile.replace(/_sport_detail\.(json|txt)$/i, '').replace(/\.(json|txt)$/i, '');
     var d = filesData[activeFile];
     var sheets = [
-      { name: 'hyroxRepLap', rows: d.repLap },
-      { name: 'hyroxCounting', rows: d.counting },
-      { name: 'hyroxTimelines', rows: d.timelines }
+      { name: 'hyroxRepLap', rows: d.repLap, fields: REP_LAP_FIELDS },
+      { name: 'hyroxCounting', rows: d.counting, fields: COUNTING_FIELDS },
+      { name: 'hyroxTimelines', rows: d.timelines, fields: TIMELINE_FIELDS }
     ];
     var enc = new TextEncoder();
     var zipFiles = [
@@ -615,7 +645,7 @@
       { name: 'xl/styles.xml', data: enc.encode(stylesXml()) }
     ];
     sheets.forEach(function (s, i) {
-      zipFiles.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: enc.encode(sheetXml(s.name, s.rows)) });
+      zipFiles.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: enc.encode(sheetXml(s.name, s.rows, s.fields)) });
     });
     var zip = buildZip(zipFiles);
     var blob = new Blob([zip], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
